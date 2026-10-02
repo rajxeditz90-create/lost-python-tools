@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>LOST Tools — LOST Python File Analyzer</title>
+  <meta name="description" content="Analyze and download Python files safely.">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="bg-orb orb-a"></div>
+  <div class="bg-orb orb-b"></div>
+
+  <main class="shell">
+    <nav class="nav">
+      <div class="brand">
+        <div class="brand-icon">Py</div>
+        <div>
+          <strong>LOST Tools</strong>
+          <span>LOST Python File Analyzer</span>
+        </div>
+      </div>
+      <div class="status"><i></i> Online</div>
+    </nav>
+
+    <section class="hero">
+      <div class="eyebrow">FAST • PRIVATE • SIMPLE</div>
+      <h1>Analyze your <span>Python files</span><br>in seconds.</h1>
+      <p>Upload a .py or .txt file to inspect its basic information and Python syntax without executing the code.</p>
+    </section>
+
+    <section class="card">
+      <form id="form">
+        <label class="dropzone" id="dropzone">
+          <input id="file" name="file" type="file" accept=".py,.txt" hidden>
+          <div class="upload-icon">↑</div>
+          <h2 id="dropTitle">Drop your file here</h2>
+          <p id="dropText">or <b>browse files</b> • max 5 MB</p>
+        </label>
+
+        <div id="fileInfo" class="file-info hidden"></div>
+
+        <button class="primary" id="analyzeBtn" type="submit">
+          Analyze File <span>→</span>
+        </button>
+      </form>
+
+      <div id="result" class="result hidden"></div>
+      <div id="error" class="error hidden"></div>
+    </section>
+
+    <section class="features">
+      <div><b>01</b><strong>Safe</strong><span>Uploaded Python is never executed.</span></div>
+      <div><b>02</b><strong>Instant</strong><span>Quick file statistics and syntax checks.</span></div>
+      <div><b>03</b><strong>Download</strong><span>Download the original file or a ZIP.</span></div>
+    </section>
+
+    <footer>LOST Tools • Built for simple, safe file inspection</footer>
+  </main>
+
+<script>
+const fileInput = document.querySelector("#file");
+const drop = document.querySelector("#dropzone");
+const form = document.querySelector("#form");
+const info = document.querySelector("#fileInfo");
+const result = document.querySelector("#result");
+const errorBox = document.querySelector("#error");
+const title = document.querySelector("#dropTitle");
+const text = document.querySelector("#dropText");
+
+function showError(msg) {
+  errorBox.textContent = msg;
+  errorBox.classList.remove("hidden");
+}
+function clearError() { errorBox.classList.add("hidden"); }
+
+function setFile(file) {
+  if (!file) return;
+  fileInput.files = new DataTransfer().files; // reset below if needed
+  const dt = new DataTransfer();
+  dt.items.add(file);
+  fileInput.files = dt.files;
+
+  info.innerHTML = `<span>Selected</span><b>${escapeHtml(file.name)}</b><small>${(file.size/1024).toFixed(1)} KB</small>`;
+  info.classList.remove("hidden");
+  title.textContent = file.name;
+  text.textContent = "Ready to analyze";
+  clearError();
+}
+
+function escapeHtml(s) {
+  return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));
+}
+
+fileInput.addEventListener("change", () => setFile(fileInput.files[0]));
+["dragenter","dragover"].forEach(e => drop.addEventListener(e, ev => {
+  ev.preventDefault(); drop.classList.add("drag");
+}));
+["dragleave","drop"].forEach(e => drop.addEventListener(e, ev => {
+  ev.preventDefault(); drop.classList.remove("drag");
+}));
+drop.addEventListener("drop", ev => setFile(ev.dataTransfer.files[0]));
+
+form.addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  clearError();
+  result.classList.add("hidden");
+
+  if (!fileInput.files[0]) return showError("Please select a file first.");
+
+  const btn = document.querySelector("#analyzeBtn");
+  btn.disabled = true;
+  btn.innerHTML = "Analyzing…";
+
+  const fd = new FormData();
+  fd.append("file", fileInput.files[0]);
+
+  try {
+    const r = await fetch("/analyze", {method:"POST", body:fd});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || "Something went wrong.");
+
+    const x = data.result;
+    const valid = x.python_valid === null ? "Not applicable" :
+                  x.python_valid ? "✓ Valid Python" : "✕ Syntax error";
+
+    result.innerHTML = `
+      <div class="result-head"><span>Analysis complete</span><strong>${valid}</strong></div>
+      <div class="stats">
+        <div><small>FILE</small><b>${escapeHtml(x.filename)}</b></div>
+        <div><small>SIZE</small><b>${(x.size/1024).toFixed(1)} KB</b></div>
+        <div><small>LINES</small><b>${x.lines}</b></div>
+        <div><small>CHARACTERS</small><b>${x.characters}</b></div>
+      </div>
+      ${x.syntax_error ? `<div class="syntax">${escapeHtml(x.syntax_error)}</div>` : ""}
+      <div class="actions">
+        <button id="download" type="button">↓ Download</button>
+        <button id="zip" type="button" class="secondary">ZIP</button>
+      </div>
+    `;
+    result.classList.remove("hidden");
+
+    document.querySelector("#download").onclick = () => postDownload("/download");
+    document.querySelector("#zip").onclick = () => postDownload("/download-zip");
+  } catch (e) {
+    showError(e.message);
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = 'Analyze File <span>→</span>';
+  }
+});
+
+async function postDownload(url) {
+  const fd = new FormData();
+  fd.append("file", fileInput.files[0]);
+  const r = await fetch(url, {method:"POST", body:fd});
+  if (!r.ok) {
+    const x = await r.json().catch(()=>({error:"Download failed"}));
+    return showError(x.error || "Download failed.");
+  }
+  const blob = await r.blob();
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = url.endsWith("zip") ? "python-file.zip" : fileInput.files[0].name;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+</script>
+</body>
+</html>
